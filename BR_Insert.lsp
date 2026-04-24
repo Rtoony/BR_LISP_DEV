@@ -1176,7 +1176,7 @@
 (defun BR:InsertBlock (blk-entry / src-full blk-name target-layer old-layer)
   (setq blk-name    (BR:BLK:Name blk-entry)
         target-layer (BR:BLK:Layer blk-entry)
-        src-full    (strcat *BR:BLK-ROOT* (BR:BLK:Source blk-entry)))
+        src-full    (BR:JoinPath *BR:BLK-ROOT* (BR:BLK:Source blk-entry)))
 
   ;; Ensure source file exists
   (if (and (> (strlen (BR:BLK:Source blk-entry)) 0)

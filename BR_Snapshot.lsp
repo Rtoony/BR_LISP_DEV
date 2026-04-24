@@ -28,6 +28,7 @@
 
 (defun BR:Snap-OpenFile (filename / fp)
   "Open file for writing, return file pointer"
+  (BR:Mkdirp *BR:Snap:OutputDir*)
   (setq fp (open (strcat *BR:Snap:OutputDir* filename) "w"))
   (if (not fp)
     (progn

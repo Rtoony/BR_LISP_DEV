@@ -438,25 +438,30 @@
 
 ;;;; -- LAYER OPERATIONS --------------------------------------------
 
-;; Create a layer if it doesn't exist, set color and linetype.
-;; Returns T on success.
-(defun BR:MakeLayer (lname lcolor ltype / doc layers lobj)
+;; Create or update a layer, set color and linetype.
+;; Returns T when the layer exists and standard properties were attempted.
+(defun BR:MakeLayer (lname lcolor ltype / doc layers lobj result)
   (setq doc    (vla-get-activedocument (vlax-get-acad-object))
         layers (vla-get-layers doc))
   (setq lobj
     (vl-catch-all-apply
-      'vla-add (list layers lname)))
-  (if (not (vl-catch-all-error-p lobj))
+      'vla-item (list layers lname)))
+  (if (vl-catch-all-error-p lobj)
+    (setq lobj
+      (vl-catch-all-apply
+        'vla-add (list layers lname)))
+  )
+  (if (vl-catch-all-error-p lobj)
+    nil
     (progn
-      (vla-put-color lobj lcolor)
-      ;; Only set linetype if it's loaded
-      (if (not (equal (strcase ltype) "CONTINUOUS"))
+      (setq result
         (vl-catch-all-apply
-          'vla-put-linetype (list lobj ltype))
-      )
+          'vla-put-color (list lobj lcolor)))
+      (setq result
+        (vl-catch-all-apply
+          'vla-put-linetype (list lobj ltype)))
       t
     )
-    nil
   )
 )
 

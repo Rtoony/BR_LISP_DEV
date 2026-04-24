@@ -182,6 +182,40 @@
   )
 )
 
+;; Return T when P is a Windows absolute path, including drive paths and UNC.
+(defun BR:AbsolutePath? (p)
+  (setq p (BR:SafeStr p))
+  (or
+    (and (>= (strlen p) 3)
+         (= (substr p 2 2) ":\\"))
+    (and (>= (strlen p) 2)
+         (= (substr p 1 2) "\\\\"))
+  )
+)
+
+;; Join ROOT and CHILD unless CHILD is already absolute.
+(defun BR:JoinPath (root child)
+  (setq root  (BR:SafeStr root)
+        child (BR:SafeStr child))
+  (cond
+    ((= child "") root)
+    ((BR:AbsolutePath? child) child)
+    ((= root "") child)
+    ((= (substr root (strlen root) 1) "\\")
+     (strcat root child))
+    (t
+     (strcat root "\\" child))
+  )
+)
+
+;; Sanitize a single file/folder name component for Windows paths.
+;; Keeps spaces because BR filenames intentionally use them.
+(defun BR:SanitizeNamePart (txt)
+  (setq txt (BR:SafeStr txt))
+  (setq txt (vl-string-translate "\\/:*?\"<>|" "---------" txt))
+  (vl-string-trim " ." txt)
+)
+
 ;; Return T if S is a non-empty string composed entirely of digits 0-9.
 (defun BR:Digits? (s / i ok ch)
   (if (= (strlen s) 0)
@@ -440,9 +474,9 @@
 ;; Pattern:  ####.## [PHASE-]TYPECODE[-description]
 (defun BR:BuildName (proj phase code desc)
   (setq proj  (BR:SafeStr proj)
-        phase (BR:SafeStr phase)
+        phase (BR:SanitizeNamePart phase)
         code  (BR:SafeStr code)
-        desc  (BR:SafeStr desc))
+        desc  (BR:SanitizeNamePart desc))
   (strcat
     proj " "
     (if (and phase (> (strlen phase) 0))

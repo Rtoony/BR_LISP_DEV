@@ -233,7 +233,7 @@
 ;; - Uses -INSERT to bring in the detail
 ;; - Pauses for user placement
 (defun BR:InsertDetail (dtl-entry / src-full)
-  (setq src-full (strcat *BR:DTL-ROOT* (BR:DTL:Source dtl-entry)))
+  (setq src-full (BR:JoinPath *BR:DTL-ROOT* (BR:DTL:Source dtl-entry)))
 
   ;; Ensure source file exists
   (if (not (findfile src-full))

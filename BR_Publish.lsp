@@ -42,7 +42,7 @@
   (setq date-str (BR:DateStr))
   (strcat date-str
     (if (and desc (/= desc ""))
-      (strcat "-" desc)
+      (strcat "-" (BR:SanitizeNamePart desc))
       ""
     )
   )
