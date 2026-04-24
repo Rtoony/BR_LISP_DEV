@@ -85,6 +85,36 @@ def check_lisp_balance(report: Report) -> None:
             report.error(f"{path.name}: paren balance ended at {balance}")
 
 
+DEFUN_RE = re.compile(r"\(defun\s+([^\s()]+)\s*\(([^)]*)\)", re.IGNORECASE | re.DOTALL)
+RISKY_LOCAL_NAMES = {"type"}
+
+
+def cleaned_lisp_text(path: Path) -> str:
+    lines: list[str] = []
+    in_string = False
+    for line in path.read_text(encoding="latin-1").splitlines():
+        cleaned, in_string = strip_lisp_comments_and_strings(line, in_string)
+        lines.append(cleaned)
+    return "\n".join(lines)
+
+
+def check_risky_local_names(report: Report) -> None:
+    for path in source_files("*.lsp"):
+        text = cleaned_lisp_text(path)
+        for match in DEFUN_RE.finditer(text):
+            func_name = match.group(1)
+            args = match.group(2)
+            if "/" not in args:
+                continue
+            locals_part = args.split("/", 1)[1]
+            local_names = re.findall(r"[^\s()]+", locals_part)
+            for local_name in local_names:
+                if local_name.lower() in RISKY_LOCAL_NAMES:
+                    report.error(
+                        f"{path.name}: {func_name} local variable '{local_name}' shadows a built-in"
+                    )
+
+
 DCL_KEY_RE = re.compile(r'\bkey\s*=\s*"([^"]+)"')
 TILE_REF_RE = re.compile(
     r'\((?:action_tile|set_tile|get_tile|mode_tile|start_list)\s+"([^"]+)"'
@@ -207,6 +237,7 @@ def run_checks() -> Report:
     report.note(f"DCL files: {len(source_files('*.dcl'))}")
 
     check_lisp_balance(report)
+    check_risky_local_names(report)
     check_dcl_keys(report)
     check_block_catalog(report)
     check_detail_catalog(report)

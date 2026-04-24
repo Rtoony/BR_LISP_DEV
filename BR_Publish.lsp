@@ -205,21 +205,21 @@
   (reverse sheets)
 )
 
-(defun BR:PUB:FormatFromDSD (lines / section line type val)
+(defun BR:PUB:FormatFromDSD (lines / section line target-type val)
   (setq section nil
-        type    nil)
+        target-type nil)
   (foreach line lines
     (if (BR:PUB:SectionName line)
       (setq section (strcase (BR:PUB:SectionName line)))
       (if (= section "TARGET")
         (progn
           (setq val (BR:PUB:LineValue line "Type"))
-          (if val (setq type (BR:PUB:Trim val)))
+          (if val (setq target-type (BR:PUB:Trim val)))
         )
       )
     )
   )
-  (if (= type "0") "DWF" "PDF")
+  (if (= target-type "0") "DWF" "PDF")
 )
 
 
