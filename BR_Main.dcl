@@ -12,7 +12,7 @@ br_main : dialog {
   : spacer { height = 0.3; }
   : list_box {
     key             = "op_list";
-    height          = 14;
+    height          = 15;
     width           = 56;
     multiple_select = false;
   }

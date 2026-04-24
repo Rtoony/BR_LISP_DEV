@@ -20,6 +20,7 @@ Load `BR.lsp` with APPLOAD or from an AutoCAD startup loader. `BR.lsp` loads the
 - `BR_PUB` - batch publish
 - `BR_DEMO`, `BR_UNDEMO` - demolition layer workflows
 - `BR_DB` - project metadata JSON editor
+- `BR_SHEETSET`, `BR_SS` - project sheet set JSON editor
 
 ## Repository Scope
 
@@ -33,7 +34,7 @@ Per-project generated support files are written to the subproject `DATA` folder:
 J:\J\<main>\dwg\<main> <sub>\DATA\
 ```
 
-Current examples are the project metadata JSON, drawing snapshot text exports, and saved `.dsd` publish definitions. `BR_PUB` reads saved `.dsd` files from this folder for sheet/page setup references, selects all DSD sheets by default, and writes a clean `BR_Publish_Run.dsd` for the active publish run using the output folder chosen in the BR dialog. If a project number cannot be detected from the drawing name, tools fall back to a `DATA` folder under the current drawing folder.
+Current examples are the project metadata JSON, sheet set JSON, drawing snapshot text exports, and saved `.dsd` publish definitions. `BR_SHEETSET` imports sheet/page setup references from a DSD into `<proj>_SheetSet.json` and can export a custom sheet index CSV. `BR_PUB` reads saved `.dsd` files from this folder for sheet/page setup references, selects all DSD sheets by default, and writes a clean `BR_Publish_Run.dsd` for the active publish run using the output folder chosen in the BR dialog. If a project number cannot be detected from the drawing name, tools fall back to a `DATA` folder under the current drawing folder.
 
 ## Development Direction
 

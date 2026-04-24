@@ -17,6 +17,7 @@
 ;;;   C:BR_DEMO   -- Move objects to DEMO layers (from BR_Demo.lsp)
 ;;;   C:BR_UNDEMO -- Restore from DEMO layers    (from BR_Demo.lsp)
 ;;;   C:BR_DB     -- Project database editor     (from BR_ProjectDB.lsp)
+;;;   C:BR_SHEETSET -- Project sheet set editor  (from BR_SheetSet.lsp)
 ;;; ================================================================
 ;;; DCL file: BR_Main.dcl (dialog name "br_main")
 ;;; ================================================================
@@ -49,6 +50,7 @@
     (BR:LoadModule "BR_Publish.lsp")
     (BR:LoadModule "BR_Demo.lsp")
     (BR:LoadModule "BR_ProjectDB.lsp")
+    (BR:LoadModule "BR_SheetSet.lsp")
   )
 )
 
@@ -105,6 +107,7 @@
             (add_list "  DEMO MOVE    Move objects to demolition layers")
             (add_list "  DEMO RESTORE Restore objects from demolition layers")
             (add_list "  PROJECT DB   Edit project database (JSON)")
+            (add_list "  SHEET SET    Edit project sheet set (JSON)")
             (end_list)
             ;; Keep startup state blank so the Enter key used to launch BR
             ;; cannot immediately accept the default NEW command.
@@ -136,6 +139,7 @@
                 ((= d-sel "10") (C:BR_DEMO))
                 ((= d-sel "11") (C:BR_UNDEMO))
                 ((= d-sel "12") (BR:ProjectDBDCL))
+                ((= d-sel "13") (BR:SheetSetDCL))
               )
             )
           )
@@ -154,7 +158,7 @@
     "\n  BR Tools v" *BR:VER* " loaded."
     "\n  Commands: BR  BR_NEW  BR_C  BR_LAY  BR_INS  BR_DTL"
     "\n            BR_AUD  BR_VP  BR_PS  BR_SNAP  BR:SnapPro  BR_PUB"
-    "\n            BR_DEMO  BR_UNDEMO  BR_DB"
+    "\n            BR_DEMO  BR_UNDEMO  BR_DB  BR_SHEETSET  BR_SS"
   )
 )
 (princ)
