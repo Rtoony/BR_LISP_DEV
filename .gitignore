@@ -1,0 +1,37 @@
+# OS/editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+*.temp
+*.log
+
+# AutoCAD transient/lock/backup files
+*.bak
+*.sv$
+*.ac$
+*.dwl
+*.dwl2
+*.err
+
+# Generated exports and local analysis output
+snapshot*.txt
+report_*.md
+report_*.html
+
+# Python/cache artifacts from experimental utilities
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Binary CAD/package assets should be promoted deliberately, not by accident
+*.dwg
+*.dwt
+*.dxf
+*.pdf
+*.xlsx
+*.zip
+
+# Local source-material/archive folder. Promote specific examples later when cleaned.
+Examples/
