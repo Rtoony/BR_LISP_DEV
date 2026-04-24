@@ -134,9 +134,10 @@
   )
 )
 
-(defun BR:PUB:MakeSheet (name dwg layout start end / dwg-base display)
+(defun BR:PUB:MakeSheet (name dwg layout setup original start end / dwg-base display)
   (setq dwg    (BR:SafeStr dwg)
-        layout (BR:SafeStr layout))
+        layout (BR:SafeStr layout)
+        setup  (BR:SafeStr setup))
   (setq dwg-base
     (if (> (strlen dwg) 0)
       (vl-filename-base dwg)
@@ -156,6 +157,8 @@
     (cons "name"    (BR:SafeStr name))
     (cons "dwg"     dwg)
     (cons "layout"  layout)
+    (cons "setup"   setup)
+    (cons "original" (BR:SafeStr original))
     (cons "display" display)
     (cons "start"   start)
     (cons "end"     end)
@@ -166,24 +169,28 @@
   (BR:SafeStr (cdr (assoc "display" sheet)))
 )
 
-(defun BR:PUB:ParseDSDSheets (lines / sheets idx line name start dwg layout)
+(defun BR:PUB:ParseDSDSheets (lines / sheets idx line name start dwg layout setup original)
   (setq sheets nil
         idx    0
         name   nil
         start  nil
         dwg    ""
-        layout "")
+        layout ""
+        setup  ""
+        original "")
   (foreach line lines
     (if (BR:PUB:SheetHeader? line)
       (progn
         (if name
           (setq sheets
-            (cons (BR:PUB:MakeSheet name dwg layout start (1- idx)) sheets))
+            (cons (BR:PUB:MakeSheet name dwg layout setup original start (1- idx)) sheets))
         )
         (setq name   (BR:PUB:SheetNameFromHeader line)
               start  idx
               dwg    ""
-              layout "")
+              layout ""
+              setup  ""
+              original "")
       )
       (if name
         (progn
@@ -193,6 +200,12 @@
           (if (BR:PUB:LineValue line "Layout")
             (setq layout (BR:PUB:LineValue line "Layout"))
           )
+          (if (BR:PUB:LineValue line "Setup")
+            (setq setup (BR:PUB:LineValue line "Setup"))
+          )
+          (if (BR:PUB:LineValue line "OriginalSheetPath")
+            (setq original (BR:PUB:LineValue line "OriginalSheetPath"))
+          )
         )
       )
     )
@@ -200,7 +213,7 @@
   )
   (if name
     (setq sheets
-      (cons (BR:PUB:MakeSheet name dwg layout start (1- idx)) sheets))
+      (cons (BR:PUB:MakeSheet name dwg layout setup original start (1- idx)) sheets))
   )
   (reverse sheets)
 )
@@ -496,28 +509,11 @@
 
 
 ;;;; -- DSD FILE GENERATOR -----------------------------------------
-;;; Writes a run DSD from the selected saved DATA DSD.
-;;; The original DSD is never modified.
+;;; Writes a clean run DSD from the selected sheet/page setup references.
+;;; The saved DSD is treated as input data only; its target/output settings
+;;; are never copied.
 ;;;
 ;;; format:  "PDF" or "DWF"
-
-(defun BR:PUB:ManagedSheetSetKey? (line)
-  (or
-    (BR:PUB:LineValue line "PromptForDwfName")
-    (BR:PUB:LineValue line "PromptForPwd")
-    (BR:PUB:LineValue line "PwdProtectPublishedDWF")
-    (BR:PUB:LineValue line "ViewFile")
-    (BR:PUB:LineValue line "LogFilePath")
-  )
-)
-
-(defun BR:PUB:WriteSheetSetOverrides (fp out-dir)
-  (write-line "PromptForDwfName=FALSE" fp)
-  (write-line "PromptForPwd=FALSE" fp)
-  (write-line "PwdProtectPublishedDWF=FALSE" fp)
-  (write-line "ViewFile=FALSE" fp)
-  (write-line (strcat "LogFilePath=" out-dir) fp)
-)
 
 (defun BR:PUB:WriteTargetSection (fp out-dir out-file target-type)
   (write-line "[Target]" fp)
@@ -525,6 +521,65 @@
   (write-line (strcat "DWF=" out-file) fp)
   (write-line (strcat "OUT=" out-dir) fp)
   (write-line "PWD=" fp)
+)
+
+(defun BR:PUB:WriteRunSheet (fp sheet / name dwg layout setup original)
+  (setq name     (BR:SafeStr (cdr (assoc "name" sheet)))
+        dwg      (BR:SafeStr (cdr (assoc "dwg" sheet)))
+        layout   (BR:SafeStr (cdr (assoc "layout" sheet)))
+        setup    (BR:SafeStr (cdr (assoc "setup" sheet)))
+        original (BR:SafeStr (cdr (assoc "original" sheet))))
+  (if (= original "") (setq original dwg))
+  (write-line (strcat "[DWF6Sheet:" name "]") fp)
+  (write-line (strcat "DWG=" dwg) fp)
+  (write-line (strcat "Layout=" layout) fp)
+  (write-line (strcat "Setup=" setup) fp)
+  (write-line (strcat "OriginalSheetPath=" original) fp)
+  (write-line "Has Plot Port=0" fp)
+  (write-line "Has3DDWF=0" fp)
+)
+
+(defun BR:PUB:WritePdfOptions (fp)
+  (write-line "[PdfOptions]" fp)
+  (write-line "IncludeHyperlinks=FALSE" fp)
+  (write-line "CreateBookmarks=TRUE" fp)
+  (write-line "CaptureFontsInDrawing=TRUE" fp)
+  (write-line "ConvertTextToGeometry=FALSE" fp)
+  (write-line "VectorResolution=600" fp)
+  (write-line "RasterResolution=400" fp)
+)
+
+(defun BR:PUB:WriteBlockData (fp)
+  (write-line "[AutoCAD Block Data]" fp)
+  (write-line "IncludeBlockInfo=0" fp)
+  (write-line "BlockTmplFilePath=" fp)
+)
+
+(defun BR:PUB:WriteSheetSetProperties (fp out-dir output-base / profile)
+  (setq profile (BR:SafeStr (getvar "CPROFILE")))
+  (write-line "[SheetSet Properties]" fp)
+  (write-line "IsSheetSet=TRUE" fp)
+  (write-line "IsHomogeneous=FALSE" fp)
+  (write-line (strcat "SheetSet Name=" output-base) fp)
+  (write-line "NoOfCopies=1" fp)
+  (write-line "PlotStampOn=FALSE" fp)
+  (write-line "ViewFile=FALSE" fp)
+  (write-line "JobID=0" fp)
+  (write-line "SelectionSetName=" fp)
+  (write-line (strcat "AcadProfile=" profile) fp)
+  (write-line "CategoryName=" fp)
+  (write-line (strcat "LogFilePath=" out-dir) fp)
+  (write-line "IncludeLayer=TRUE" fp)
+  (write-line "LineMerge=FALSE" fp)
+  (write-line "CurrentPrecision=" fp)
+  (write-line "PromptForDwfName=FALSE" fp)
+  (write-line "PwdProtectPublishedDWF=FALSE" fp)
+  (write-line "PromptForPwd=FALSE" fp)
+  (write-line "RepublishingMarkups=FALSE" fp)
+  (write-line "DSTPath=" fp)
+  (write-line "PublishSheetSetMetadata=FALSE" fp)
+  (write-line "PublishSheetMetadata=FALSE" fp)
+  (write-line "3DDWFOptions=0 0" fp)
 )
 
 (defun BR:PUB:OutputBase (selected-indices / sheet dwg)
@@ -538,9 +593,8 @@
 )
 
 (defun BR:PUB:WriteRunDSD (selected-indices out-dir format
-                         / data-dir dsd-path fp line section sheet-idx
-                           include-sheet skip-sheet skip-target out-file
-                           target-type output-base target-written)
+                         / data-dir dsd-path fp idx sheet out-file
+                           target-type output-base)
   (setq data-dir (BR:CurrentDataDir))
   (setq dsd-path
     (if data-dir
@@ -558,58 +612,22 @@
   (if (null fp)
     (progn (princ "\n  [ERROR] Cannot create run DSD file.") nil)
     (progn
-      (setq sheet-idx    -1
-            skip-sheet   nil
-            skip-target  nil
-            section      nil
-            target-written nil
-      )
+      (write-line "[DWF6Version]" fp)
+      (write-line "Ver=1" fp)
+      (write-line "[DWF6MinorVersion]" fp)
+      (write-line "MinorVer=1" fp)
 
-      (foreach line *BR:PUB-DSD-LINES*
-        (cond
-          ((BR:PUB:SheetHeader? line)
-           (setq sheet-idx     (1+ sheet-idx)
-                 include-sheet (member sheet-idx selected-indices)
-                 skip-sheet    (not include-sheet)
-                 skip-target   nil
-                 section       (BR:PUB:SectionName line))
-           (if include-sheet (write-line line fp))
-          )
-          ((BR:PUB:SectionName line)
-           (setq skip-sheet nil
-                 skip-target nil
-                 section    (strcase (BR:PUB:SectionName line)))
-           (cond
-             ((= section "TARGET")
-              ;; The source DSD's target is deliberately ignored. A fresh
-              ;; target section is written here using the dialog output.
-              (BR:PUB:WriteTargetSection fp out-dir out-file target-type)
-              (setq target-written T)
-              (setq skip-target T))
-             ((= section "SHEETSET PROPERTIES")
-              (write-line line fp)
-              (BR:PUB:WriteSheetSetOverrides fp out-dir))
-             (t
-              (write-line line fp))
-           )
-          )
-          (skip-sheet
-           nil)
-          (skip-target
-           nil)
-          ((and (= section "SHEETSET PROPERTIES")
-                (BR:PUB:ManagedSheetSetKey? line))
-           nil)
-          ((= section "TARGET")
-           nil)
-          (t
-           (write-line line fp))
+      (foreach idx selected-indices
+        (setq sheet (nth idx *BR:PUB-SHEETS*))
+        (if sheet
+          (BR:PUB:WriteRunSheet fp sheet)
         )
       )
 
-      (if (not target-written)
-        (BR:PUB:WriteTargetSection fp out-dir out-file target-type)
-      )
+      (BR:PUB:WriteTargetSection fp out-dir out-file target-type)
+      (BR:PUB:WritePdfOptions fp)
+      (BR:PUB:WriteBlockData fp)
+      (BR:PUB:WriteSheetSetProperties fp out-dir output-base)
 
       (close fp)
       (princ (strcat "\n  Run DSD generated: " dsd-path))
