@@ -41,3 +41,13 @@ Long-term work:
 - Use the company database as the source of truth.
 - Keep AutoLISP focused on AutoCAD execution, UI, and command orchestration.
 - Add automated generation or export of `.lsp` runtime data from validated database records where direct DB access is not practical.
+
+## Developer Checks
+
+Run the lightweight source validator before committing changes:
+
+```powershell
+python .\tools\validate_repo.py
+```
+
+The validator does not require AutoCAD. It checks basic Lisp balance, DCL tile references, catalog duplicates, invalid layer colors, and remaining hardcoded drive paths.
