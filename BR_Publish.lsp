@@ -253,6 +253,23 @@
   )
 )
 
+(defun BR:PUB:NextAvailableFile (path / ext base candidate seq)
+  (setq ext  (vl-filename-extension path)
+        base (if ext (substr path 1 (- (strlen path) (strlen ext))) path))
+  (if (not (findfile path))
+    path
+    (progn
+      (setq seq 2)
+      (setq candidate (strcat base "_" (itoa seq) (BR:SafeStr ext)))
+      (while (findfile candidate)
+        (setq seq (1+ seq))
+        (setq candidate (strcat base "_" (itoa seq) (BR:SafeStr ext)))
+      )
+      candidate
+    )
+  )
+)
+
 
 ;;;; -- UTILITY: Preview / Build output path -----------------------
 
@@ -484,20 +501,46 @@
 ;;;
 ;;; format:  "PDF" or "DWF"
 
+(defun BR:PUB:ManagedSheetSetKey? (line)
+  (or
+    (BR:PUB:LineValue line "PromptForDwfName")
+    (BR:PUB:LineValue line "PromptForPwd")
+    (BR:PUB:LineValue line "PwdProtectPublishedDWF")
+    (BR:PUB:LineValue line "ViewFile")
+    (BR:PUB:LineValue line "LogFilePath")
+  )
+)
+
+(defun BR:PUB:WriteSheetSetOverrides (fp out-dir)
+  (write-line "PromptForDwfName=FALSE" fp)
+  (write-line "PromptForPwd=FALSE" fp)
+  (write-line "PwdProtectPublishedDWF=FALSE" fp)
+  (write-line "ViewFile=FALSE" fp)
+  (write-line (strcat "LogFilePath=" out-dir) fp)
+)
+
+(defun BR:PUB:WriteTargetSection (fp out-dir out-file target-type)
+  (write-line "[Target]" fp)
+  (write-line (strcat "Type=" target-type) fp)
+  (write-line (strcat "DWF=" out-file) fp)
+  (write-line (strcat "OUT=" out-dir) fp)
+  (write-line "PWD=" fp)
+)
+
 (defun BR:PUB:OutputBase (selected-indices / sheet dwg)
   (setq sheet (if selected-indices (nth (car selected-indices) *BR:PUB-SHEETS*) nil)
         dwg   (if sheet (cdr (assoc "dwg" sheet)) ""))
   (cond
-    ((> (strlen (BR:SafeStr dwg)) 0) (vl-filename-base dwg))
     (*BR:PUB-DSD-PATH*              (vl-filename-base *BR:PUB-DSD-PATH*))
+    ((> (strlen (BR:SafeStr dwg)) 0) (vl-filename-base dwg))
     (t                              (vl-filename-base (getvar "DWGNAME")))
   )
 )
 
 (defun BR:PUB:WriteRunDSD (selected-indices out-dir format
                          / data-dir dsd-path fp line section sheet-idx
-                           include-sheet skip-sheet out-file type-val
-                           output-base target-seen)
+                           include-sheet skip-sheet skip-target out-file
+                           target-type output-base target-written)
   (setq data-dir (BR:CurrentDataDir))
   (setq dsd-path
     (if data-dir
@@ -505,9 +548,11 @@
       (strcat (getvar "TEMPPREFIX") "BR_Publish.dsd")
     )
   )
-  (setq type-val (if (= format "DWF") "0" "6"))
+  (setq target-type (if (= format "DWF") "0" "6"))
   (setq output-base (BR:PUB:OutputBase selected-indices))
-  (setq out-file (strcat out-dir output-base "." (strcase format t)))
+  (setq out-file
+    (BR:PUB:NextAvailableFile
+      (strcat out-dir output-base "." (strcase format t))))
 
   (setq fp (open dsd-path "w"))
   (if (null fp)
@@ -515,8 +560,10 @@
     (progn
       (setq sheet-idx    -1
             skip-sheet   nil
+            skip-target  nil
             section      nil
-            target-seen  nil)
+            target-written nil
+      )
 
       (foreach line *BR:PUB-DSD-LINES*
         (cond
@@ -524,46 +571,49 @@
            (setq sheet-idx     (1+ sheet-idx)
                  include-sheet (member sheet-idx selected-indices)
                  skip-sheet    (not include-sheet)
+                 skip-target   nil
                  section       (BR:PUB:SectionName line))
            (if include-sheet (write-line line fp))
           )
           ((BR:PUB:SectionName line)
            (setq skip-sheet nil
+                 skip-target nil
                  section    (strcase (BR:PUB:SectionName line)))
-           (if (= section "TARGET") (setq target-seen T))
-           (write-line line fp)
-          )
-          (skip-sheet
-           nil)
-          ((= section "TARGET")
            (cond
-             ((BR:PUB:LineValue line "Type")
-              (write-line (strcat "Type=" type-val) fp))
-             ((BR:PUB:LineValue line "DWF")
-              (write-line (strcat "DWF=" out-file) fp))
-             ((BR:PUB:LineValue line "OUT")
-              (write-line (strcat "OUT=" out-dir) fp))
+             ((= section "TARGET")
+              ;; The source DSD's target is deliberately ignored. A fresh
+              ;; target section is written here using the dialog output.
+              (BR:PUB:WriteTargetSection fp out-dir out-file target-type)
+              (setq target-written T)
+              (setq skip-target T))
+             ((= section "SHEETSET PROPERTIES")
+              (write-line line fp)
+              (BR:PUB:WriteSheetSetOverrides fp out-dir))
              (t
               (write-line line fp))
            )
           )
+          (skip-sheet
+           nil)
+          (skip-target
+           nil)
+          ((and (= section "SHEETSET PROPERTIES")
+                (BR:PUB:ManagedSheetSetKey? line))
+           nil)
+          ((= section "TARGET")
+           nil)
           (t
            (write-line line fp))
         )
       )
 
-      (if (not target-seen)
-        (progn
-          (write-line "[Target]" fp)
-          (write-line (strcat "Type=" type-val) fp)
-          (write-line (strcat "DWF=" out-file) fp)
-          (write-line (strcat "OUT=" out-dir) fp)
-          (write-line "PWD=" fp)
-        )
+      (if (not target-written)
+        (BR:PUB:WriteTargetSection fp out-dir out-file target-type)
       )
 
       (close fp)
       (princ (strcat "\n  Run DSD generated: " dsd-path))
+      (princ (strcat "\n  Publish target: " out-file))
       dsd-path
     )
   )
