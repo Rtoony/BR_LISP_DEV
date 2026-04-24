@@ -6,7 +6,23 @@ br_publish : dialog {
   label = "BR : Publish";
 
   : boxed_column {
-    label = " Layouts ";
+    label = " Saved DSD ";
+
+    : list_box {
+      key    = "pub_dsd";
+      height = 4;
+      width  = 56;
+    }
+
+    : text {
+      key   = "pub_dsd_status";
+      label = "Saved DSD: ";
+      width = 60;
+    }
+  }
+
+  : boxed_column {
+    label = " Sheets ";
 
     : list_box {
       key             = "pub_layouts";
@@ -31,15 +47,10 @@ br_publish : dialog {
       : radio_button { key = "fmt_dwf"; label = "DWF"; }
     }
 
-    : toggle {
-      key   = "multi_sheet";
-      label = "Multi-sheet (all layouts in one file)";
-    }
-
     : radio_row {
       key = "dest_group";
       : radio_button { key = "dest_markups"; label = "Markups Folder"; value = "1"; }
-      : radio_button { key = "dest_dwgdir";  label = "Drawing Folder"; }
+      : radio_button { key = "dest_tfolder"; label = "T Folder"; }
     }
 
     : row {
@@ -57,7 +68,7 @@ br_publish : dialog {
   : boxed_column {
     label = " Info ";
 
-    : text { key = "pub_count"; label = "Selected: 0 layout(s)"; }
+    : text { key = "pub_count"; label = "Selected: 0 sheet(s)"; }
     : text { key = "pub_proj";  label = "Project: "; }
     : text { key = "pub_method"; label = "Method: DSD Batch Publish"; }
   }

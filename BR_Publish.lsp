@@ -5,8 +5,8 @@
 ;;; DCL file: BR_Publish.dcl (dialog name "br_publish")
 ;;; Command:  BR_PUB
 ;;;
-;;; Primary method: generates a DSD file in project DATA and calls -PUBLISH.
-;;; Fallback: individual -PLOT per layout (legacy support).
+;;; Primary method: uses a saved DSD file from the project DATA folder.
+;;; The saved DSD provides the sheet list and page setup information.
 ;;; ================================================================
 
 (vl-load-com)
@@ -14,12 +14,17 @@
 ;;;; -- GLOBALS ----------------------------------------------------
 
 (setq *BR:PUB-LAYOUTS*    nil)
+(setq *BR:PUB-SHEETS*     nil)
+(setq *BR:PUB-DSD-FILES*  nil)
+(setq *BR:PUB-DSD-IDX*    0)
+(setq *BR:PUB-DSD-PATH*   nil)
+(setq *BR:PUB-DSD-LINES*  nil)
 (setq *BR:PUB-SELECTED*   nil)
 (setq *BR:PUB-FORMAT*     "PDF")
 (setq *BR:PUB-DEST*       "MARKUPS")
 (setq *BR:PUB-DESC*       "")
-(setq *BR:PUB-MULTISHEET* nil)
 (setq *BR:MARKUPS-ROOT*   "J:\\Markups\\")
+(setq *BR:T-ROOT*         "J:\\T\\")
 
 
 ;;;; -- UTILITY: Parse space-delimited index string ----------------
@@ -33,6 +38,188 @@
       (if (vl-catch-all-error-p result) nil result)
     )
   )
+)
+
+(defun BR:PUB:StartsWith (s prefix)
+  (setq s (BR:SafeStr s)
+        prefix (BR:SafeStr prefix))
+  (and (<= (strlen prefix) (strlen s))
+       (= (substr s 1 (strlen prefix)) prefix))
+)
+
+(defun BR:PUB:EndsWith (s suffix / start)
+  (setq s (BR:SafeStr s)
+        suffix (BR:SafeStr suffix))
+  (if (> (strlen suffix) (strlen s))
+    nil
+    (progn
+      (setq start (+ (- (strlen s) (strlen suffix)) 1))
+      (= (substr s start) suffix)
+    )
+  )
+)
+
+(defun BR:PUB:Trim (s)
+  (vl-string-trim " \t\r\n" (BR:SafeStr s))
+)
+
+(defun BR:PUB:LineValue (line key / prefix)
+  (setq prefix (strcat key "="))
+  (if (BR:PUB:StartsWith (strcase (BR:SafeStr line)) (strcase prefix))
+    (substr line (1+ (strlen prefix)))
+    nil
+  )
+)
+
+(defun BR:PUB:SectionName (line)
+  (setq line (BR:SafeStr line))
+  (if (and (BR:PUB:StartsWith line "[")
+           (BR:PUB:EndsWith line "]")
+           (> (strlen line) 2))
+    (substr line 2 (- (strlen line) 2))
+    nil
+  )
+)
+
+(defun BR:PUB:SheetHeader? (line)
+  (and (BR:PUB:StartsWith line "[DWF6Sheet:")
+       (BR:PUB:EndsWith line "]"))
+)
+
+(defun BR:PUB:SheetNameFromHeader (line / section prefix)
+  (setq section (BR:PUB:SectionName line)
+        prefix  "DWF6Sheet:")
+  (if (and section (BR:PUB:StartsWith section prefix))
+    (substr section (1+ (strlen prefix)))
+    (BR:SafeStr section)
+  )
+)
+
+
+;;;; -- UTILITY: DSD FILES -----------------------------------------
+
+(defun BR:PUB:GeneratedDSD? (name / upper)
+  (setq upper (strcase (BR:SafeStr name)))
+  (member upper '("BR_PUBLISH_RUN.DSD" "BR_PUBLISH_LASTRUN.DSD"))
+)
+
+(defun BR:PUB:FindDSDFiles (/ dir names result)
+  (setq dir (BR:CurrentDataDir)
+        result nil)
+  (if (and dir (vl-file-directory-p dir))
+    (progn
+      (setq names (vl-sort (vl-directory-files dir "*.dsd" 1) '<))
+      (foreach name names
+        (if (not (BR:PUB:GeneratedDSD? name))
+          (setq result (append result (list (strcat dir name))))
+        )
+      )
+    )
+  )
+  result
+)
+
+(defun BR:PUB:ReadLines (path / fp line lines)
+  (setq fp (open path "r")
+        lines nil)
+  (if fp
+    (progn
+      (while (setq line (read-line fp))
+        (setq lines (cons line lines))
+      )
+      (close fp)
+      (reverse lines)
+    )
+    nil
+  )
+)
+
+(defun BR:PUB:MakeSheet (name dwg layout start end / dwg-base display)
+  (setq dwg    (BR:SafeStr dwg)
+        layout (BR:SafeStr layout))
+  (setq dwg-base
+    (if (> (strlen dwg) 0)
+      (vl-filename-base dwg)
+      ""
+    )
+  )
+  (setq display
+    (cond
+      ((and (> (strlen dwg-base) 0) (> (strlen layout) 0))
+       (strcat dwg-base " | " layout))
+      ((> (strlen layout) 0) layout)
+      ((> (strlen (BR:SafeStr name)) 0) name)
+      (t "<unnamed sheet>")
+    )
+  )
+  (list
+    (cons "name"    (BR:SafeStr name))
+    (cons "dwg"     dwg)
+    (cons "layout"  layout)
+    (cons "display" display)
+    (cons "start"   start)
+    (cons "end"     end)
+  )
+)
+
+(defun BR:PUB:SheetDisplay (sheet)
+  (BR:SafeStr (cdr (assoc "display" sheet)))
+)
+
+(defun BR:PUB:ParseDSDSheets (lines / sheets idx line name start dwg layout)
+  (setq sheets nil
+        idx    0
+        name   nil
+        start  nil
+        dwg    ""
+        layout "")
+  (foreach line lines
+    (if (BR:PUB:SheetHeader? line)
+      (progn
+        (if name
+          (setq sheets
+            (cons (BR:PUB:MakeSheet name dwg layout start (1- idx)) sheets))
+        )
+        (setq name   (BR:PUB:SheetNameFromHeader line)
+              start  idx
+              dwg    ""
+              layout "")
+      )
+      (if name
+        (progn
+          (if (BR:PUB:LineValue line "DWG")
+            (setq dwg (BR:PUB:LineValue line "DWG"))
+          )
+          (if (BR:PUB:LineValue line "Layout")
+            (setq layout (BR:PUB:LineValue line "Layout"))
+          )
+        )
+      )
+    )
+    (setq idx (1+ idx))
+  )
+  (if name
+    (setq sheets
+      (cons (BR:PUB:MakeSheet name dwg layout start (1- idx)) sheets))
+  )
+  (reverse sheets)
+)
+
+(defun BR:PUB:FormatFromDSD (lines / section line type val)
+  (setq section nil
+        type    nil)
+  (foreach line lines
+    (if (BR:PUB:SectionName line)
+      (setq section (strcase (BR:PUB:SectionName line)))
+      (if (= section "TARGET")
+        (progn
+          (setq val (BR:PUB:LineValue line "Type"))
+          (if val (setq type (BR:PUB:Trim val)))
+        )
+      )
+    )
+  )
+  (if (= type "0") "DWF" "PDF")
 )
 
 
@@ -67,13 +254,28 @@
 )
 
 
-;;;; -- UTILITY: Preview / Build Markups path ----------------------
+;;;; -- UTILITY: Preview / Build output path -----------------------
 
-(defun BR:PUB:PreviewMarkupPath (proj desc / proj-dir folder-name base-path)
+(defun BR:PUB:RootForDest (dest)
+  (cond
+    ((= dest "T") *BR:T-ROOT*)
+    (t            *BR:MARKUPS-ROOT*)
+  )
+)
+
+(defun BR:PUB:DestLabel (dest)
+  (cond
+    ((= dest "T") "T")
+    (t            "Markups")
+  )
+)
+
+(defun BR:PUB:PreviewOutputPath (proj desc dest / root proj-dir folder-name base-path)
   (if (null proj)
     nil
     (progn
-      (setq proj-dir    (strcat *BR:MARKUPS-ROOT* proj))
+      (setq root        (BR:PUB:RootForDest dest))
+      (setq proj-dir    (strcat root proj))
       (setq folder-name (BR:PUB:FolderName desc))
       (setq base-path   (strcat proj-dir "\\" folder-name))
       (strcat (BR:PUB:NextAvailable base-path) "\\")
@@ -81,12 +283,13 @@
   )
 )
 
-(defun BR:PUB:BuildMarkupPath (proj desc / proj-dir folder-name
+(defun BR:PUB:BuildOutputPath (proj desc dest / root proj-dir folder-name
                                 base-path out-dir)
   (if (null proj)
     nil
     (progn
-      (setq proj-dir (strcat *BR:MARKUPS-ROOT* proj))
+      (setq root     (BR:PUB:RootForDest dest))
+      (setq proj-dir (strcat root proj))
       (if (not (vl-file-directory-p proj-dir))
         (BR:Mkdirp proj-dir)
       )
@@ -97,6 +300,14 @@
       (strcat out-dir "\\")
     )
   )
+)
+
+(defun BR:PUB:PreviewMarkupPath (proj desc)
+  (BR:PUB:PreviewOutputPath proj desc "MARKUPS")
+)
+
+(defun BR:PUB:BuildMarkupPath (proj desc)
+  (BR:PUB:BuildOutputPath proj desc "MARKUPS")
 )
 
 
@@ -112,41 +323,26 @@
 )
 
 
-;;;; -- BR:PUB:GetLayouts ------------------------------------------
-
-(defun BR:PUB:GetLayouts (/ doc layouts layout-list)
-  (setq doc     (vla-get-ActiveDocument (vlax-get-Acad-Object)))
-  (setq layouts (vla-get-Layouts doc))
-  (vlax-for lay layouts
-    (if (/= (strcase (vla-get-Name lay)) "MODEL")
-      (setq layout-list (cons (vla-get-Name lay) layout-list))
-    )
-  )
-  (if layout-list
-    (vl-sort layout-list '<)
-  )
-)
-
-
 ;;;; -- DIALOG HELPERS ---------------------------------------------
 
 (defun BR:PUB:RefreshCount (/ idx-list cnt)
   (setq idx-list (BR:PUB:ParseIndices *BR:PUB-SELECTED*))
   (setq cnt (if idx-list (length idx-list) 0))
   (set_tile "pub_count"
-    (strcat "Selected: " (itoa cnt) " layout(s)"))
+    (strcat "Selected: " (itoa cnt) " sheet(s)"))
 )
 
 (defun BR:PUB:RefreshOutdir (/ proj preview-path)
-  (if (= *BR:PUB-DEST* "MARKUPS")
+  (if (member *BR:PUB-DEST* '("MARKUPS" "T"))
     (progn
       (setq proj (BR:DetectProj))
       (if proj
         (progn
           (setq preview-path
-            (BR:PUB:PreviewMarkupPath proj *BR:PUB-DESC*))
+            (BR:PUB:PreviewOutputPath proj *BR:PUB-DESC* *BR:PUB-DEST*))
           (set_tile "pub_outdir"
-            (strcat "Output: " (BR:SafeStr preview-path)))
+            (strcat "Output (" (BR:PUB:DestLabel *BR:PUB-DEST*) "): "
+                    (BR:SafeStr preview-path)))
         )
         (set_tile "pub_outdir"
           "Output: ** Project not detected -- will use drawing folder **")
@@ -155,6 +351,74 @@
     (set_tile "pub_outdir"
       (strcat "Output: " (getvar "DWGPREFIX")))
   )
+)
+
+(defun BR:PUB:SetFormatTiles ()
+  (set_tile "fmt_pdf" (if (= *BR:PUB-FORMAT* "PDF") "1" "0"))
+  (set_tile "fmt_dwf" (if (= *BR:PUB-FORMAT* "DWF") "1" "0"))
+)
+
+(defun BR:PUB:RefreshDSDStatus (/ file count)
+  (setq count (length *BR:PUB-DSD-FILES*)
+        file  (if *BR:PUB-DSD-PATH* (vl-filename-base *BR:PUB-DSD-PATH*) ""))
+  (set_tile "pub_dsd_status"
+    (cond
+      ((= count 1) (strcat "Using saved DSD: " file ".dsd"))
+      ((> count 1) "Multiple DSD files found. Choose the publish set above.")
+      (t "No DSD files found in DATA."))
+    )
+  (set_tile "pub_method"
+    (strcat "Method: Saved DSD"
+            (if (> (strlen file) 0) (strcat " - " file ".dsd") "")))
+)
+
+(defun BR:PUB:FillSheetList ()
+  (setq *BR:PUB-LAYOUTS* (mapcar 'BR:PUB:SheetDisplay *BR:PUB-SHEETS*))
+  (start_list "pub_layouts")
+  (foreach item *BR:PUB-LAYOUTS*
+    (add_list item)
+  )
+  (end_list)
+  (BR:PUB:SelectAll)
+)
+
+(defun BR:PUB:FillDSDList (/ idx)
+  (start_list "pub_dsd")
+  (foreach path *BR:PUB-DSD-FILES*
+    (add_list (strcat (vl-filename-base path) ".dsd"))
+  )
+  (end_list)
+  (setq idx (if *BR:PUB-DSD-IDX* *BR:PUB-DSD-IDX* 0))
+  (set_tile "pub_dsd" (itoa idx))
+  (if (<= (length *BR:PUB-DSD-FILES*) 1)
+    (mode_tile "pub_dsd" 1)
+    (mode_tile "pub_dsd" 0)
+  )
+  (BR:PUB:RefreshDSDStatus)
+)
+
+(defun BR:PUB:SetActiveDSD (idx / path lines sheets)
+  (if (or (null idx)
+          (< idx 0)
+          (>= idx (length *BR:PUB-DSD-FILES*)))
+    (setq idx 0)
+  )
+  (setq path   (nth idx *BR:PUB-DSD-FILES*)
+        lines  (if path (BR:PUB:ReadLines path) nil)
+        sheets (if lines (BR:PUB:ParseDSDSheets lines) nil))
+  (setq *BR:PUB-DSD-IDX*   idx
+        *BR:PUB-DSD-PATH*  path
+        *BR:PUB-DSD-LINES* lines
+        *BR:PUB-SHEETS*    sheets
+        *BR:PUB-FORMAT*    (if lines (BR:PUB:FormatFromDSD lines) "PDF"))
+  sheets
+)
+
+(defun BR:PUB:ChooseDSD (idx)
+  (BR:PUB:SetActiveDSD idx)
+  (BR:PUB:SetFormatTiles)
+  (BR:PUB:RefreshDSDStatus)
+  (BR:PUB:FillSheetList)
 )
 
 (defun BR:PUB:SelectAll (/ i num-layouts sel-str)
@@ -197,12 +461,13 @@
 ;;;; -- RESOLVE OUTPUT DIRECTORY -----------------------------------
 
 (defun BR:PUB:ResolveOutDir (/ proj markup-path)
-  (if (= *BR:PUB-DEST* "MARKUPS")
+  (if (member *BR:PUB-DEST* '("MARKUPS" "T"))
     (progn
       (setq proj (BR:DetectProj))
       (if proj
         (progn
-          (setq markup-path (BR:PUB:BuildMarkupPath proj *BR:PUB-DESC*))
+          (setq markup-path
+            (BR:PUB:BuildOutputPath proj *BR:PUB-DESC* *BR:PUB-DEST*))
           (if markup-path markup-path (getvar "DWGPREFIX"))
         )
         (getvar "DWGPREFIX")
@@ -214,86 +479,91 @@
 
 
 ;;;; -- DSD FILE GENERATOR -----------------------------------------
-;;; Generates a project DATA DSD (Drawing Set Description) file for
-;;; the PUBLISH command.  Returns the path to the DSD, or nil.
+;;; Writes a run DSD from the selected saved DATA DSD.
+;;; The original DSD is never modified.
 ;;;
 ;;; format:  "PDF" or "DWF"
-;;; multi:   T for multi-sheet output, nil for individual sheets
 
-(defun BR:PUB:WriteDSD (layouts out-dir format multi
-                         / data-dir dsd-path fp dwg-path dwg-base
-                           layout-name out-file type-val)
+(defun BR:PUB:OutputBase (selected-indices / sheet dwg)
+  (setq sheet (if selected-indices (nth (car selected-indices) *BR:PUB-SHEETS*) nil)
+        dwg   (if sheet (cdr (assoc "dwg" sheet)) ""))
+  (cond
+    ((> (strlen (BR:SafeStr dwg)) 0) (vl-filename-base dwg))
+    (*BR:PUB-DSD-PATH*              (vl-filename-base *BR:PUB-DSD-PATH*))
+    (t                              (vl-filename-base (getvar "DWGNAME")))
+  )
+)
+
+(defun BR:PUB:WriteRunDSD (selected-indices out-dir format
+                         / data-dir dsd-path fp line section sheet-idx
+                           include-sheet skip-sheet out-file type-val
+                           output-base target-seen)
   (setq data-dir (BR:CurrentDataDir))
   (setq dsd-path
     (if data-dir
-      (strcat data-dir "BR_Publish.dsd")
+      (strcat data-dir "BR_Publish_Run.dsd")
       (strcat (getvar "TEMPPREFIX") "BR_Publish.dsd")
     )
   )
-  (setq dwg-path (strcat (getvar "DWGPREFIX") (getvar "DWGNAME")))
-  (setq dwg-base (vl-filename-base (getvar "DWGNAME")))
   (setq type-val (if (= format "DWF") "0" "6"))
-
-  ;; Output filename for multi-sheet mode
-  (setq out-file
-    (if multi
-      (strcat out-dir dwg-base "." (strcase format t))
-      (strcat out-dir dwg-base "." (strcase format t))
-    )
-  )
+  (setq output-base (BR:PUB:OutputBase selected-indices))
+  (setq out-file (strcat out-dir output-base "." (strcase format t)))
 
   (setq fp (open dsd-path "w"))
   (if (null fp)
-    (progn (princ "\n  [ERROR] Cannot create DSD temp file.") nil)
+    (progn (princ "\n  [ERROR] Cannot create run DSD file.") nil)
     (progn
-      ;; -- Header --
-      (write-line "[DWF6Version]" fp)
-      (write-line "Ver=1" fp)
-      (write-line "[DWF6MinorVersion]" fp)
-      (write-line "MinorVer=1" fp)
+      (setq sheet-idx    -1
+            skip-sheet   nil
+            section      nil
+            target-seen  nil)
 
-      ;; -- Sheet entries --
-      (foreach layout-name layouts
-        (write-line (strcat "[DWF6Sheet:" dwg-base "-" layout-name "]") fp)
-        (write-line (strcat "DWG=" dwg-path) fp)
-        (write-line (strcat "Layout=" layout-name) fp)
-        (write-line "Setup=" fp)
-        (write-line (strcat "OriginalSheetPath=" dwg-path) fp)
-        (write-line "Has Plot Port=0" fp)
-        (write-line "Has3DDWF=0" fp)
+      (foreach line *BR:PUB-DSD-LINES*
+        (cond
+          ((BR:PUB:SheetHeader? line)
+           (setq sheet-idx     (1+ sheet-idx)
+                 include-sheet (member sheet-idx selected-indices)
+                 skip-sheet    (not include-sheet)
+                 section       (BR:PUB:SectionName line))
+           (if include-sheet (write-line line fp))
+          )
+          ((BR:PUB:SectionName line)
+           (setq skip-sheet nil
+                 section    (strcase (BR:PUB:SectionName line)))
+           (if (= section "TARGET") (setq target-seen T))
+           (write-line line fp)
+          )
+          (skip-sheet
+           nil)
+          ((= section "TARGET")
+           (cond
+             ((BR:PUB:LineValue line "Type")
+              (write-line (strcat "Type=" type-val) fp))
+             ((BR:PUB:LineValue line "DWF")
+              (write-line (strcat "DWF=" out-file) fp))
+             ((BR:PUB:LineValue line "OUT")
+              (write-line (strcat "OUT=" out-dir) fp))
+             (t
+              (write-line line fp))
+           )
+          )
+          (t
+           (write-line line fp))
+        )
       )
 
-      ;; -- Target --
-      (write-line "[Target]" fp)
-      (write-line (strcat "Type=" type-val) fp)
-      (write-line (strcat "DWF=" out-file) fp)
-      (write-line (strcat "OUT=" out-dir) fp)
-      (write-line "PWD=" fp)
-
-      ;; -- Sheet Set Properties --
-      (write-line "[SheetSet Properties]" fp)
-      (write-line "IsSheetSet=FALSE" fp)
-      (write-line "IsHomogeneous=FALSE" fp)
-      (write-line "SheetSet Name=" fp)
-      (write-line "NoOfCopies=1" fp)
-      (write-line "PlotStampOn=FALSE" fp)
-      (write-line "ViewFile=FALSE" fp)
-      (write-line "JobID=0" fp)
-      (write-line "SelectionSetName=" fp)
-      (write-line "AcadProfile=" fp)
-      (write-line "CategoryName=" fp)
-      (write-line "LogFilePath=" fp)
-      (write-line "IncludeLayer=FALSE" fp)
-      (write-line "LineMerge=FALSE" fp)
-      (write-line "CurrentPrecision=" fp)
-      (write-line "PromptForDwfName=FALSE" fp)
-      (write-line "PwdProtectPublishedDWF=FALSE" fp)
-      (write-line "PromptForPwd=FALSE" fp)
-      (write-line "RepublishingMarkups=FALSE" fp)
-      (write-line "DSTPath=" fp)
+      (if (not target-seen)
+        (progn
+          (write-line "[Target]" fp)
+          (write-line (strcat "Type=" type-val) fp)
+          (write-line (strcat "DWF=" out-file) fp)
+          (write-line (strcat "OUT=" out-dir) fp)
+          (write-line "PWD=" fp)
+        )
+      )
 
       (close fp)
-      (princ (strcat "\n  DSD generated: " dsd-path))
+      (princ (strcat "\n  Run DSD generated: " dsd-path))
       dsd-path
     )
   )
@@ -301,7 +571,7 @@
 
 
 ;;;; -- DSD PUBLISH ------------------------------------------------
-;;; Call -PUBLISH with the generated DSD file.
+;;; Call -PUBLISH with the run DSD file.
 ;;; Returns T on success, nil on failure.
 
 (defun BR:PUB:PublishViaDSD (dsd-path / result)
@@ -329,161 +599,111 @@
 )
 
 
-;;;; -- LEGACY: Individual -PLOT (fallback) ------------------------
-
-(defun BR:PUB:PlotLayout (layout-name output-path / result)
-  (setvar "CTAB" layout-name)
-  (setq result
-    (vl-catch-all-apply
-      '(lambda ()
-         (command "._-PLOT"
-           "No" "" "" output-path "No" "Yes")
-         (while (> (getvar "CMDACTIVE") 0) (command ""))
-         T
-       )
-    )
-  )
-  (if (vl-catch-all-error-p result)
-    (progn
-      (princ (strcat "\n  [FAIL] " layout-name ": "
-                     (vl-catch-all-error-message result)))
-      nil
-    )
-    (progn
-      (princ (strcat "\n  [OK] " layout-name " -> " output-path))
-      T
-    )
-  )
-)
-
-(defun BR:PUB:PublishIndividual (layout-names out-dir ext / dwg-name
-                                 layout-name output-path count ok)
-  (setq dwg-name (vl-filename-base (getvar "DWGNAME")))
-  (setq count 0)
-  (foreach layout-name layout-names
-    (setq output-path
-      (strcat out-dir dwg-name "-" layout-name "." ext))
-    (princ (strcat "\n  Plotting: " layout-name "..."))
-    (setq ok (BR:PUB:PlotLayout layout-name output-path))
-    (if ok (setq count (1+ count)))
-  )
-  (princ (strcat "\n  Plotted " (itoa count) " of "
-                 (itoa (length layout-names)) " file(s)."))
-  count
-)
-
-
 ;;;; -- DIALOG FLOW ------------------------------------------------
 
-(defun BR:PublishDCL (/ dcl-path dcl-id result sel-indices sel-names proj)
-  (setq dcl-path (findfile "BR_Publish.dcl"))
-  (if (null dcl-path)
-    (progn
-      (alert
-        (strcat
-          "BR_Publish.dcl not found.\n\n"
-          "Make sure BR_Publish.dcl is in the same folder as the LSP files\n"
-          "and that folder is on AutoCAD's support path."))
-      nil
-    )
-    (progn
-      (setq dcl-id (load_dialog dcl-path))
-      (if (< dcl-id 0)
-        (progn (alert (strcat "Cannot load DCL file:\n" dcl-path)) nil)
-        (if (not (new_dialog "br_publish" dcl-id))
-          (progn
-            (unload_dialog dcl-id)
-            (alert "Cannot initialize br_publish dialog.")
-            nil
-          )
-          (progn
-            ;; Initialize state
-            (setq *BR:PUB-LAYOUTS*    (BR:PUB:GetLayouts))
-            (setq *BR:PUB-SELECTED*   "")
-            (setq *BR:PUB-FORMAT*     "PDF")
-            (setq *BR:PUB-DEST*       "MARKUPS")
-            (setq *BR:PUB-DESC*       "")
-            (setq *BR:PUB-MULTISHEET* nil)
+(defun BR:PublishDCL (/ dcl-path dcl-id result sel-indices proj data-dir)
+  (setq *BR:PUB-DSD-FILES* (BR:PUB:FindDSDFiles))
+  (cond
+    ((null *BR:PUB-DSD-FILES*)
+     (setq data-dir (BR:CurrentDataDir))
+     (alert
+       (strcat
+         "No DSD files were found in the project DATA folder.\n\n"
+         (BR:SafeStr data-dir)
+         "\n\nSave a publish DSD file there, then run BR_PUB again."))
+     nil)
 
-            (if (null *BR:PUB-LAYOUTS*)
-              (progn
-                (unload_dialog dcl-id)
-                (alert "No paper-space layouts found in current drawing.")
-                nil
-              )
-              (progn
-                ;; Fill layout list
-                (start_list "pub_layouts")
-                (mapcar 'add_list *BR:PUB-LAYOUTS*)
-                (end_list)
+    ((null (setq dcl-path (findfile "BR_Publish.dcl")))
+     (alert
+       (strcat
+         "BR_Publish.dcl not found.\n\n"
+         "Make sure BR_Publish.dcl is in the same folder as the LSP files\n"
+         "and that folder is on AutoCAD's support path."))
+     nil)
 
-                ;; Set defaults
-                (set_tile "fmt_pdf" "1")
-                (set_tile "fmt_dwf" "0")
-                (set_tile "multi_sheet" "0")
-                (set_tile "dest_markups" "1")
-                (set_tile "dest_dwgdir"  "0")
+    ((< (setq dcl-id (load_dialog dcl-path)) 0)
+     (alert (strcat "Cannot load DCL file:\n" dcl-path))
+     nil)
 
-                ;; Show project
-                (setq proj (BR:DetectProj))
-                (set_tile "pub_proj"
-                  (strcat "Project: "
-                    (if proj proj "** not detected **")))
+    ((not (new_dialog "br_publish" dcl-id))
+     (unload_dialog dcl-id)
+     (alert "Cannot initialize br_publish dialog.")
+     nil)
 
-                ;; Method display
-                (set_tile "pub_method" "Method: DSD Batch Publish")
+    (t
+     ;; Initialize state
+     (setq *BR:PUB-DSD-IDX*    0)
+     (setq *BR:PUB-SELECTED*   "")
+     (setq *BR:PUB-DEST*       "MARKUPS")
+     (setq *BR:PUB-DESC*       "")
+     (BR:PUB:SetActiveDSD 0)
 
-                (BR:PUB:RefreshCount)
-                (BR:PUB:RefreshOutdir)
+     (if (null *BR:PUB-SHEETS*)
+       (progn
+         (unload_dialog dcl-id)
+         (alert
+           (strcat
+             "No publish sheets were found in the selected DSD file.\n\n"
+             (BR:SafeStr *BR:PUB-DSD-PATH*)))
+         nil
+       )
+       (progn
+         (BR:PUB:FillDSDList)
+         (BR:PUB:FillSheetList)
 
-                ;; -- Action tiles --
-                (action_tile "pub_layouts"
-                  "(setq *BR:PUB-SELECTED* (BR:SafeStr $value))(BR:PUB:RefreshCount)")
-                (action_tile "btn_all"    "(BR:PUB:SelectAll)")
-                (action_tile "btn_none"   "(BR:PUB:SelectNone)")
-                (action_tile "btn_invert" "(BR:PUB:Invert)")
+         ;; Defaults
+         (BR:PUB:SetFormatTiles)
+         (set_tile "dest_markups" "1")
+         (set_tile "dest_tfolder" "0")
 
-                (action_tile "fmt_pdf"
-                  "(setq *BR:PUB-FORMAT* \"PDF\")")
-                (action_tile "fmt_dwf"
-                  "(setq *BR:PUB-FORMAT* \"DWF\")")
+         (setq proj (BR:DetectProj))
+         (set_tile "pub_proj"
+           (strcat "Project: "
+             (if proj proj "** not detected **")))
 
-                (action_tile "multi_sheet"
-                  "(setq *BR:PUB-MULTISHEET* (= (BR:SafeStr $value) \"1\"))")
+         (BR:PUB:RefreshDSDStatus)
+         (BR:PUB:RefreshOutdir)
 
-                (action_tile "dest_markups"
-                  "(setq *BR:PUB-DEST* \"MARKUPS\")(BR:PUB:RefreshOutdir)")
-                (action_tile "dest_dwgdir"
-                  "(setq *BR:PUB-DEST* \"DWGDIR\")(BR:PUB:RefreshOutdir)")
+         ;; -- Action tiles --
+         (action_tile "pub_layouts"
+           "(setq *BR:PUB-SELECTED* (BR:SafeStr $value))(BR:PUB:RefreshCount)")
+         (action_tile "pub_dsd"
+           "(BR:PUB:ChooseDSD (BR:DCL:SafeIndex $value))")
+         (action_tile "btn_all"    "(BR:PUB:SelectAll)")
+         (action_tile "btn_none"   "(BR:PUB:SelectNone)")
+         (action_tile "btn_invert" "(BR:PUB:Invert)")
 
-                (action_tile "pub_desc"
-                  "(setq *BR:PUB-DESC* (BR:SafeStr $value))(BR:PUB:RefreshOutdir)")
+         (action_tile "fmt_pdf"
+           "(setq *BR:PUB-FORMAT* \"PDF\")")
+         (action_tile "fmt_dwf"
+           "(setq *BR:PUB-FORMAT* \"DWF\")")
 
-                (action_tile "accept" "(done_dialog 1)")
-                (action_tile "cancel" "(done_dialog 0)")
+         (action_tile "dest_markups"
+           "(setq *BR:PUB-DEST* \"MARKUPS\")(BR:PUB:RefreshOutdir)")
+         (action_tile "dest_tfolder"
+           "(setq *BR:PUB-DEST* \"T\")(BR:PUB:RefreshOutdir)")
 
-                ;; -- Run --
-                (setq result (start_dialog))
-                (unload_dialog dcl-id)
+         (action_tile "pub_desc"
+           "(setq *BR:PUB-DESC* (BR:SafeStr $value))(BR:PUB:RefreshOutdir)")
 
-                ;; -- Return selected layout names --
-                (if (= result 1)
-                  (progn
-                    (setq sel-indices (BR:PUB:ParseIndices *BR:PUB-SELECTED*))
-                    (if sel-indices
-                      (mapcar
-                        '(lambda (i) (nth i *BR:PUB-LAYOUTS*))
-                        sel-indices)
-                      (progn (alert "No layouts selected.") nil)
-                    )
-                  )
-                  nil
-                )
-              )
-            )
-          )
-        )
-      )
+         (action_tile "accept" "(done_dialog 1)")
+         (action_tile "cancel" "(done_dialog 0)")
+
+         (setq result (start_dialog))
+         (unload_dialog dcl-id)
+
+         (if (= result 1)
+           (progn
+             (setq sel-indices (BR:PUB:ParseIndices *BR:PUB-SELECTED*))
+             (if sel-indices
+               sel-indices
+               (progn (alert "No sheets selected.") nil)
+             )
+           )
+           nil
+         )
+       )
+     )
     )
   )
 )
@@ -492,7 +712,7 @@
 ;;;; -- COMMAND: C:BR_PUB ------------------------------------------
 
 (defun C:BR_PUB (/ *error* _olderr _saved _undoFlag
-                   sel-layouts out-dir ext dsd-path pub-ok)
+                   sel-indices out-dir ext dsd-path pub-ok)
   (vl-load-com)
   (setq _saved  (BR:SaveSysvars '("CMDECHO" "CTAB" "BACKGROUNDPLOT"))
         _olderr *error*)
@@ -510,40 +730,31 @@
   (setq _undoFlag (BR:BeginUndo))
 
   ;; Run dialog
-  (setq sel-layouts (BR:PublishDCL))
+  (setq sel-indices (BR:PublishDCL))
 
-  (if sel-layouts
+  (if sel-indices
     (progn
       ;; Resolve output directory
       (setq out-dir (BR:PUB:ResolveOutDir))
       (setq ext (strcase *BR:PUB-FORMAT* t))
 
       (princ
-        (strcat "\n  Publishing " (itoa (length sel-layouts))
-                " layout(s) as " (strcase ext t)
-                " to: " out-dir))
+        (strcat "\n  Publishing " (itoa (length sel-indices))
+                " sheet(s) from " (vl-filename-base *BR:PUB-DSD-PATH*) ".dsd"
+                " as " (strcase ext t) " to: " out-dir))
 
-      ;; Primary method: DSD batch publish
+      ;; Primary method: saved DSD filtered to the selected sheets.
       (setq dsd-path
-        (BR:PUB:WriteDSD sel-layouts out-dir
-                         *BR:PUB-FORMAT* *BR:PUB-MULTISHEET*))
+        (BR:PUB:WriteRunDSD sel-indices out-dir *BR:PUB-FORMAT*))
       (if dsd-path
         (progn
           (setq pub-ok (BR:PUB:PublishViaDSD dsd-path))
           (if pub-ok
             (princ "\n  DSD publish complete.")
-            (progn
-              ;; Fallback to individual -PLOT if DSD fails
-              (princ "\n  DSD publish failed -- falling back to individual -PLOT...")
-              (BR:PUB:PublishIndividual sel-layouts out-dir ext)
-            )
+            (princ "\n  DSD publish failed.")
           )
         )
-        ;; DSD generation failed -- fall back
-        (progn
-          (princ "\n  DSD generation failed -- using individual -PLOT...")
-          (BR:PUB:PublishIndividual sel-layouts out-dir ext)
-        )
+        (princ "\n  Run DSD generation failed.")
       )
 
       (princ "\n  BR_Publish complete.")

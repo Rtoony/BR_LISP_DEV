@@ -33,7 +33,7 @@ Per-project generated support files are written to the subproject `DATA` folder:
 J:\J\<main>\dwg\<main> <sub>\DATA\
 ```
 
-Current examples are the project metadata JSON, drawing snapshot text exports, and the latest `BR_Publish.dsd` used by the publish workflow. If a project number cannot be detected from the drawing name, tools fall back to a `DATA` folder under the current drawing folder.
+Current examples are the project metadata JSON, drawing snapshot text exports, and saved `.dsd` publish definitions. `BR_PUB` reads saved `.dsd` files from this folder, selects all DSD sheets by default, and writes a derived `BR_Publish_Run.dsd` for the active publish run. If a project number cannot be detected from the drawing name, tools fall back to a `DATA` folder under the current drawing folder.
 
 ## Development Direction
 
