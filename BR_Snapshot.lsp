@@ -2,9 +2,9 @@
 ;;; BR_Snapshot.lsp  |  Brelje & Race CAD Tools  |  Drawing Snapshot
 ;;; ================================================================
 ;;; Module: Drawing Portal -- snapshot exporter
-;;; Description: Exports current drawing state to C:\CAD_IO\logs\ for Claude Code analysis
+;;; Description: Exports current drawing state to the project DATA folder for analysis
 ;;; Version: 2026-03-25
-;;; Safety: READ-ONLY -- queries drawing data, writes only to CAD_IO export folder
+;;; Safety: READ-ONLY -- queries drawing data, writes only snapshot text files
 ;;;
 ;;; Commands:
 ;;;   BR:Snap     -- Full drawing snapshot (layers, entities, blocks, text, xrefs, sysvars)
@@ -18,21 +18,35 @@
 (vl-load-com)
 
 ;;; ===== CONFIGURATION =====
-(setq *BR:Snap:OutputDir*   "C:\\CAD_IO\\logs\\"
-      *BR:Snap:Separator*   "|"
+(setq *BR:Snap:Separator*   "|"
       *BR:Snap:MaxTextLen*   200      ; truncate long text content
       *BR:Snap:MaxEntDetail* 5000    ; max entities for detailed export
+      *BR:Snap:LastFilePath* nil
 )
 
 ;;; ===== FILE I/O HELPERS =====
 
-(defun BR:Snap-OpenFile (filename / fp)
+(defun BR:Snap-OutputDir (/ dir)
+  "Return the DATA folder used for snapshot exports."
+  (setq dir (BR:CurrentDataDir))
+  (if dir
+    dir
+    (getvar "DWGPREFIX")
+  )
+)
+
+(defun BR:Snap-OpenFile (filename / dir path fp)
   "Open file for writing, return file pointer"
-  (BR:Mkdirp *BR:Snap:OutputDir*)
-  (setq fp (open (strcat *BR:Snap:OutputDir* filename) "w"))
+  (setq dir (BR:Snap-OutputDir))
+  (if (and dir (not (vl-file-directory-p dir)))
+    (BR:Mkdirp dir)
+  )
+  (setq path (strcat dir filename))
+  (setq *BR:Snap:LastFilePath* path)
+  (setq fp (open path "w"))
   (if (not fp)
     (progn
-      (princ (strcat "\nERROR: Cannot write to " *BR:Snap:OutputDir* filename))
+      (princ (strcat "\nERROR: Cannot write to " path))
       nil
     )
     fp
@@ -559,7 +573,7 @@
       (BR:Snap-WriteLine fp (strcat "ElapsedMs|" (itoa (- (getvar "MILLISECS") t1))))
       
       (BR:Snap-CloseFile fp)
-      (princ (strcat "\nSnapshot saved: C:\\CAD_IO\\logs\\snapshot.txt ("
+      (princ (strcat "\nSnapshot saved: " *BR:Snap:LastFilePath* " ("
                      (itoa (- (getvar "MILLISECS") t1)) "ms)"))
     )
   )
@@ -591,7 +605,8 @@
       (BR:Snap-Section fp "END")
       (BR:Snap-WriteLine fp (strcat "GeneratedBy|BR:SnapQ v1.0"))
       (BR:Snap-CloseFile fp)
-      (princ (strcat "\nQuick snapshot saved (" (itoa (- (getvar "MILLISECS") t1)) "ms)"))
+      (princ (strcat "\nQuick snapshot saved: " *BR:Snap:LastFilePath* " ("
+                     (itoa (- (getvar "MILLISECS") t1)) "ms)"))
     )
   )
   
@@ -626,8 +641,9 @@
           (BR:Snap-Section fp "END")
           (BR:Snap-WriteLine fp (strcat "GeneratedBy|BR:SnapSel v1.0"))
           (BR:Snap-CloseFile fp)
-          (princ (strcat "\nSelection snapshot saved: " (itoa (sslength ss)) 
-                         " entities (" (itoa (- (getvar "MILLISECS") t1)) "ms)"))
+          (princ (strcat "\nSelection snapshot saved: " *BR:Snap:LastFilePath*
+                         " (" (itoa (sslength ss)) " entities, "
+                         (itoa (- (getvar "MILLISECS") t1)) "ms)"))
         )
       )
     )
@@ -702,6 +718,8 @@
   (set_tile "mode_full" "1")
   (set_tile "snap_desc"
     "Full snapshot: layers, entities, blocks, text, xrefs, styles, linetypes.")
+  (set_tile "snap_output"
+    (strcat "Output: " (BR:Snap-OutputDir)))
 
   ;; Actions -- update description on radio change
   (action_tile "mode_full"

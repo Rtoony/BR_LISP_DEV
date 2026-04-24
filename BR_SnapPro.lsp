@@ -9,7 +9,7 @@
 ;;; Commands:
 ;;;   BR:SnapPro  -- Full enhanced snapshot (everything BR:Snap does + geometry, text bounds, attrs, viewports)
 ;;;
-;;; Output: C:\CAD_IO\logs\snapshot_pro.txt
+;;; Output: current project DATA folder\snapshot_pro.txt
 ;;; Depends: BR_Snapshot.lsp (for base helpers)
 ;;; ================================================================
 
@@ -968,7 +968,7 @@
       (BR:Snap-WriteLine fp (strcat "ElapsedMs|" (itoa (- (getvar "MILLISECS") t1))))
       
       (BR:Snap-CloseFile fp)
-      (princ (strcat "\nPro snapshot saved: C:\\CAD_IO\\logs\\snapshot_pro.txt ("
+      (princ (strcat "\nPro snapshot saved: " *BR:Snap:LastFilePath* " ("
                      (itoa (- (getvar "MILLISECS") t1)) "ms)"))
     )
   )

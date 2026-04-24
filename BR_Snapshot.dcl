@@ -28,7 +28,7 @@ br_snapshot : dialog {
     }
     : text {
       key       = "snap_output";
-      label     = "Output:  C:\\CAD_IO\\logs\\";
+      label     = "Output: project DATA folder";
       alignment = left;
       width     = 66;
     }

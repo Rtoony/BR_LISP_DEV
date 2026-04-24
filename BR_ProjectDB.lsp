@@ -24,12 +24,8 @@
 
 ;; Return the DATA directory for a project.
 ;; Creates it if it does not exist.
-(defun BR:DB:DataDir (proj / dir)
-  (setq dir (strcat (BR:BaseDir proj) "DATA\\"))
-  (if (not (vl-file-directory-p dir))
-    (BR:Mkdirp dir)
-  )
-  dir
+(defun BR:DB:DataDir (proj)
+  (BR:DataDir proj)
 )
 
 ;; Full path to the project JSON file.

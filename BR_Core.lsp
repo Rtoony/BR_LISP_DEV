@@ -498,6 +498,37 @@
           ".dwg")
 )
 
+;; Project/subproject DATA folder for tool-generated project files.
+;; "5212.00" -> J:\J\5212\dwg\5212 00\DATA\
+(defun BR:DataDir (proj / dir)
+  (if (BR:ValidProj? proj)
+    (progn
+      (setq dir (strcat (BR:BaseDir proj) "DATA\\"))
+      (if (not (vl-file-directory-p dir))
+        (BR:Mkdirp dir)
+      )
+      dir
+    )
+    nil
+  )
+)
+
+;; DATA folder for the current drawing. Prefer the detected project number,
+;; but fall back to a DATA folder under the current DWG folder for ad-hoc files.
+(defun BR:CurrentDataDir (/ proj dir)
+  (setq proj (BR:DetectProj))
+  (if proj
+    (BR:DataDir proj)
+    (progn
+      (setq dir (BR:JoinPath (getvar "DWGPREFIX") "DATA\\"))
+      (if (not (vl-file-directory-p dir))
+        (BR:Mkdirp dir)
+      )
+      dir
+    )
+  )
+)
+
 
 ;;;; -- CORE CREATE FUNCTION ----------------------------------------
 

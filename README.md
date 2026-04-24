@@ -25,6 +25,16 @@ Load `BR.lsp` with APPLOAD or from an AutoCAD startup loader. `BR.lsp` loads the
 
 The initial public baseline tracks the production `.lsp` and `.dcl` files at the repo root. The historical `Examples/` folder is ignored for now because it contains backups, experiments, generated files, and binary CAD assets. Specific examples can be cleaned and promoted later.
 
+## Project Data Output
+
+Per-project generated support files are written to the subproject `DATA` folder:
+
+```text
+J:\J\<main>\dwg\<main> <sub>\DATA\
+```
+
+Current examples are the project metadata JSON, drawing snapshot text exports, and the latest `BR_Publish.dsd` used by the publish workflow. If a project number cannot be detected from the drawing name, tools fall back to a `DATA` folder under the current drawing folder.
+
 ## Development Direction
 
 Near-term work:

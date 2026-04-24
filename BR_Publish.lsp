@@ -5,7 +5,7 @@
 ;;; DCL file: BR_Publish.dcl (dialog name "br_publish")
 ;;; Command:  BR_PUB
 ;;;
-;;; Primary method: generates a DSD file and calls -PUBLISH.
+;;; Primary method: generates a DSD file in project DATA and calls -PUBLISH.
 ;;; Fallback: individual -PLOT per layout (legacy support).
 ;;; ================================================================
 
@@ -214,16 +214,22 @@
 
 
 ;;;; -- DSD FILE GENERATOR -----------------------------------------
-;;; Generates a temporary DSD (Drawing Set Description) file for
+;;; Generates a project DATA DSD (Drawing Set Description) file for
 ;;; the PUBLISH command.  Returns the path to the DSD, or nil.
 ;;;
 ;;; format:  "PDF" or "DWF"
 ;;; multi:   T for multi-sheet output, nil for individual sheets
 
 (defun BR:PUB:WriteDSD (layouts out-dir format multi
-                         / dsd-path fp dwg-path dwg-base
+                         / data-dir dsd-path fp dwg-path dwg-base
                            layout-name out-file type-val)
-  (setq dsd-path (strcat (getvar "TEMPPREFIX") "BR_Publish.dsd"))
+  (setq data-dir (BR:CurrentDataDir))
+  (setq dsd-path
+    (if data-dir
+      (strcat data-dir "BR_Publish.dsd")
+      (strcat (getvar "TEMPPREFIX") "BR_Publish.dsd")
+    )
+  )
   (setq dwg-path (strcat (getvar "DWGPREFIX") (getvar "DWGNAME")))
   (setq dwg-base (vl-filename-base (getvar "DWGNAME")))
   (setq type-val (if (= format "DWF") "0" "6"))
@@ -524,10 +530,6 @@
       (if dsd-path
         (progn
           (setq pub-ok (BR:PUB:PublishViaDSD dsd-path))
-          ;; Clean up temp DSD
-          (if (findfile dsd-path)
-            (vl-file-delete dsd-path)
-          )
           (if pub-ok
             (princ "\n  DSD publish complete.")
             (progn
